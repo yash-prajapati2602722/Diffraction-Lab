@@ -10,7 +10,12 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroidSize
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -93,8 +98,9 @@ private data class Poly3D(
 )
 
 private enum class DragControlMode(val label: String) {
-    ORBIT_CAMERA("Drag: Orbit 3D Camera"),
-    SWING_TELESCOPE("Drag: Swing Telescope (θ)")
+    ORBIT_CAMERA("1-Finger: Free Orbit 360°"),
+    PAN_CAMERA("1-Finger: Free Pan (X/Y)"),
+    SWING_TELESCOPE("1-Finger: Swing Telescope (θ)")
 }
 
 @Composable
@@ -106,7 +112,10 @@ fun Prayogshala3DSpectrometerCard(
 ) {
     var camYawDeg by remember { mutableFloatStateOf(-38f) }
     var camPitchDeg by remember { mutableFloatStateOf(26f) }
+    var camRollDeg by remember { mutableFloatStateOf(0f) }
     var camZoom by remember { mutableFloatStateOf(1.12f) }
+    var camPanX by remember { mutableFloatStateOf(0f) }
+    var camPanY by remember { mutableFloatStateOf(0f) }
     var xRayMode by remember { mutableStateOf(true) }
     var showFig51bAnatomy by remember { mutableStateOf(true) }
     var showCurvedScreenArc by remember { mutableStateOf(true) }
@@ -254,7 +263,7 @@ fun Prayogshala3DSpectrometerCard(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(325.dp)
+                .height(340.dp)
                 .clip(RoundedCornerShape(14.dp))
                 .background(
                     Brush.verticalGradient(
@@ -263,41 +272,94 @@ fun Prayogshala3DSpectrometerCard(
                 )
                 .border(1.dp, Color(0xFF24355C), RoundedCornerShape(14.dp))
                 .testTag("prayogshala_3d_canvas")
-                .pointerInput(dragMode) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        if (dragMode == DragControlMode.ORBIT_CAMERA) {
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onDoubleTap = {
                             autoOrbit = false
-                            camYawDeg = (camYawDeg + dragAmount.x * 0.45f) % 360f
-                            camPitchDeg = (camPitchDeg + dragAmount.y * 0.35f).coerceIn(6f, 82f)
-                        } else {
-                            val nextAngle = (uiState.telescopeAngleDeg - dragAmount.x * 0.22f).coerceIn(-72f, 72f)
-                            onAngleChange(nextAngle)
+                            camYawDeg = -38f
+                            camPitchDeg = 26f
+                            camRollDeg = 0f
+                            camZoom = 1.12f
+                            camPanX = 0f
+                            camPanY = 0f
                         }
+                    )
+                }
+                .pointerInput(dragMode) {
+                    // Immediate raw gesture handler that consumes all pointer events before parent
+                    // verticalScroll can intercept vertical drags, supporting 1-finger Orbit/Pan/Swing
+                    // and 2-finger Pinch-Zoom + Two-Finger Pan simultaneously.
+                    awaitEachGesture {
+                        val firstDown = awaitFirstDown(requireUnconsumed = false)
+                        firstDown.consume()
+                        do {
+                            val event = awaitPointerEvent()
+                            val pressedCount = event.changes.count { it.pressed }
+                            if (pressedCount >= 2) {
+                                autoOrbit = false
+                                val zoomChange = event.calculateZoom()
+                                val panChange = event.calculatePan()
+                                if (zoomChange != 1f && zoomChange > 0f) {
+                                    camZoom = (camZoom * zoomChange).coerceIn(0.45f, 3.20f)
+                                }
+                                camPanX = (camPanX + panChange.x).coerceIn(-280f, 280f)
+                                camPanY = (camPanY + panChange.y).coerceIn(-220f, 220f)
+                                event.changes.forEach { it.consume() }
+                            } else if (pressedCount == 1) {
+                                val change = event.changes.firstOrNull()
+                                if (change != null) {
+                                    val delta = change.position - change.previousPosition
+                                    if (delta != Offset.Zero) {
+                                        when (dragMode) {
+                                            DragControlMode.ORBIT_CAMERA -> {
+                                                autoOrbit = false
+                                                camYawDeg = (camYawDeg + delta.x * 0.52f) % 360f
+                                                camPitchDeg = (camPitchDeg + delta.y * 0.48f).coerceIn(-88f, 88f)
+                                            }
+                                            DragControlMode.PAN_CAMERA -> {
+                                                autoOrbit = false
+                                                camPanX = (camPanX + delta.x * 1.15f).coerceIn(-280f, 280f)
+                                                camPanY = (camPanY + delta.y * 1.15f).coerceIn(-220f, 220f)
+                                            }
+                                            DragControlMode.SWING_TELESCOPE -> {
+                                                val nextAngle = (uiState.telescopeAngleDeg - delta.x * 0.25f).coerceIn(-72f, 72f)
+                                                onAngleChange(nextAngle)
+                                            }
+                                        }
+                                    }
+                                    change.consume()
+                                }
+                            }
+                        } while (event.changes.any { it.pressed })
                     }
                 }
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val w = size.width
                 val h = size.height
-                val cx = w * 0.5f
-                val cy = h * 0.56f
+                val cx = w * 0.5f + camPanX
+                val cy = h * 0.56f + camPanY
 
                 val yawRad = Math.toRadians(effectiveYawDeg.toDouble()).toFloat()
                 val pitchRad = Math.toRadians(camPitchDeg.toDouble()).toFloat()
+                val rollRad = Math.toRadians(camRollDeg.toDouble()).toFloat()
                 val cosY = cos(yawRad)
                 val sinY = sin(yawRad)
                 val cosP = cos(pitchRad)
                 val sinP = sin(pitchRad)
+                val cosR = cos(rollRad)
+                val sinR = sin(rollRad)
 
                 val fovScale = (w.coerceAtMost(h) * 0.92f) * camZoom
                 val cameraDist = 420f
 
                 fun project(v: Vec3): ProjectedPt {
-                    val rx = v.x * cosY - v.z * sinY
+                    val rx1 = v.x * cosY - v.z * sinY
                     val rz1 = v.x * sinY + v.z * cosY
-                    val ry = v.y * cosP - rz1 * sinP
+                    val ry1 = v.y * cosP - rz1 * sinP
                     val rz = v.y * sinP + rz1 * cosP
+                    val rx = rx1 * cosR - ry1 * sinR
+                    val ry = rx1 * sinR + ry1 * cosR
 
                     val denom = (cameraDist + rz).coerceAtLeast(60f)
                     val persp = fovScale / denom
@@ -859,6 +921,74 @@ fun Prayogshala3DSpectrometerCard(
                     color = SpectralEmerald
                 )
             }
+
+            // Top-Left Free Camera Telemetry & Quick Reset Pill
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(10.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF070C1A).copy(alpha = 0.86f))
+                    .border(1.dp, LabBorder, RoundedCornerShape(10.dp))
+                    .clickable {
+                        autoOrbit = false
+                        camYawDeg = -38f
+                        camPitchDeg = 26f
+                        camRollDeg = 0f
+                        camZoom = 1.12f
+                        camPanX = 0f
+                        camPanY = 0f
+                    }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Yaw ${camYawDeg.toInt()}° • Pitch ${camPitchDeg.toInt()}° • Zoom ${"%.1f".format(camZoom)}x",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LaserCyan
+                )
+                Text(
+                    text = "↺ Reset 3D",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = SpectralAmber
+                )
+            }
+
+            // Bottom-Right Quick On-Screen 3D Pan / Zoom / Orbit Gimbal Buttons
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(10.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF070C1A).copy(alpha = 0.88f))
+                    .border(1.dp, LabBorder, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf(
+                    "◀" to { camPanX -= 24f },
+                    "▲" to { camPanY -= 20f },
+                    "▼" to { camPanY += 20f },
+                    "▶" to { camPanX += 24f },
+                    "−" to { camZoom = (camZoom - 0.18f).coerceIn(0.45f, 3.20f) },
+                    "+" to { camZoom = (camZoom + 0.18f).coerceIn(0.45f, 3.20f) }
+                ).forEach { (sym, action) ->
+                    Surface(
+                        color = LabSurfaceElevated,
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.clickable { action() }
+                    ) {
+                        Text(
+                            text = sym,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = TextPrimary,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -872,10 +1002,12 @@ fun Prayogshala3DSpectrometerCard(
         ) {
             listOf(
                 Triple("Iso 3D (Fig 5.1b)", -38f, 26f),
-                Triple("Top Turntable", 0f, 80f),
-                Triple("Grating Clamp", -85f, 16f),
+                Triple("Top Turntable (90°)", 0f, 85f),
+                Triple("Bottom Up (-45°)", -30f, -45f),
+                Triple("Grating Close-Up", -85f, 14f),
                 Triple("Telescope POV", -uiState.telescopeAngleDeg - 12f, 18f),
-                Triple("Slit & Collimator", 15f, 22f)
+                Triple("Slit & Collimator", 15f, 22f),
+                Triple("Rear Lamp View", 180f, 20f)
             ).forEach { (label, presetYaw, presetPitch) ->
                 Surface(
                     color = LabSurfaceElevated,
@@ -886,6 +1018,9 @@ fun Prayogshala3DSpectrometerCard(
                             autoOrbit = false
                             camYawDeg = presetYaw
                             camPitchDeg = presetPitch
+                            camPanX = 0f
+                            camPanY = 0f
+                            if (label == "Grating Close-Up") camZoom = 1.65f else camZoom = 1.12f
                         }
                 ) {
                     Text(
@@ -900,9 +1035,57 @@ fun Prayogshala3DSpectrometerCard(
 
         Spacer(modifier = Modifier.height(4.dp))
 
+        // Direct 3D Camera Sliders (Yaw 360°, Pitch ±88°, Telescope Swing, and Zoom 0.45x..3.2x)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "3D Yaw (${camYawDeg.toInt()}°) & Pitch (${camPitchDeg.toInt()}°)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LaserCyan
+                )
+                Slider(
+                    value = camYawDeg,
+                    onValueChange = {
+                        autoOrbit = false
+                        camYawDeg = it
+                    },
+                    valueRange = -180f..180f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = LaserCyan,
+                        activeTrackColor = LaserCyan,
+                        inactiveTrackColor = LabSurfaceElevated
+                    )
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "3D Pitch Angle (${camPitchDeg.toInt()}°)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = SpectralEmerald
+                )
+                Slider(
+                    value = camPitchDeg,
+                    onValueChange = {
+                        autoOrbit = false
+                        camPitchDeg = it
+                    },
+                    valueRange = -88f..88f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = SpectralEmerald,
+                        activeTrackColor = SpectralEmerald,
+                        inactiveTrackColor = LabSurfaceElevated
+                    )
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
@@ -922,16 +1105,16 @@ fun Prayogshala3DSpectrometerCard(
                     )
                 )
             }
-            Column(modifier = Modifier.weight(0.75f)) {
+            Column(modifier = Modifier.weight(0.85f)) {
                 Text(
-                    text = "3D Zoom (${"%.1f".format(camZoom)}x)",
+                    text = "3D Zoom (${"%.2f".format(camZoom)}x)",
                     style = MaterialTheme.typography.labelSmall,
                     color = LaserCyan
                 )
                 Slider(
                     value = camZoom,
                     onValueChange = { camZoom = it },
-                    valueRange = 0.75f..1.85f,
+                    valueRange = 0.45f..3.20f,
                     colors = SliderDefaults.colors(
                         thumbColor = LaserCyan,
                         activeTrackColor = LaserCyan,

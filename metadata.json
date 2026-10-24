@@ -1,0 +1,6 @@
+{
+  "name": "Diffraction Lab",
+  "description": "Interactive PrayogShala-inspired Diffraction Grating physics lab simulator where students adjust slit spacing, grating density, and light wavelength to explore interference patterns, intensity profiles, spectrometer vernier readings, and grating equations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

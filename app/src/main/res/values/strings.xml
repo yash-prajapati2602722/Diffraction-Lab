@@ -1,0 +1,26 @@
+<resources>
+    <string name="app_name">Diffraction Lab</string>
+    <string name="subtitle_prayogshala">PrayogShala Spectrometer &amp; PH3001(P) Optics Suite</string>
+    <string name="tab_bench">Optical Bench</string>
+    <string name="tab_spectrometer">Spectrometer</string>
+    <string name="tab_observations">Lab Table</string>
+    <string name="tab_more_labs">PH3001 Labs</string>
+    <string name="tab_theory">Manual &amp; Viva</string>
+    <string name="label_source_mode">Light Source</string>
+    <string name="mode_monochromatic">Monochromatic Laser</string>
+    <string name="mode_mercury">Mercury Vapor Lamp (Hg)</string>
+    <string name="mode_sodium">Sodium Doublet (Na)</string>
+    <string name="mode_hydrogen">Hydrogen Balmer (H)</string>
+    <string name="label_wavelength">Wavelength (λ)</string>
+    <string name="label_slit_spacing">Slit Spacing (d)</string>
+    <string name="label_grating_lines">Grating Density (N)</string>
+    <string name="label_slit_width">Single Slit Width (a)</string>
+    <string name="label_num_slits">Active Slits (M)</string>
+    <string name="label_screen_distance">Screen Distance (L)</string>
+    <string name="label_telescope_angle">Telescope Angle (θ)</string>
+    <string name="btn_record_reading">Record Fringe Reading</string>
+    <string name="btn_snap_nearest_peak">Snap to Nearest Peak</string>
+    <string name="btn_clear_log">Clear Table</string>
+    <string name="btn_reset_defaults">Reset Apparatus</string>
+    <string name="desc_hero_banner">Optical Diffraction Grating Laboratory Setup Illustration</string>
+</resources>
